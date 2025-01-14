@@ -111,7 +111,7 @@ def mainCalibration():
     #mapx, mapy = cv2.initUndistortRectifyMap(K, dist, None, newK, (w,h), 5)
     print(dist)
     print(dist.shape)
-    print("width by height: ", (w,h))
+    #print("width by height: ", (w,h))
     #adding dist[0] to make dimensions work. 
     # now method comes out with h x w. But does calculations in w,h 
     mapx, mapy = undistort(K, dist[0], newK,np.identity(3), (w,h))
@@ -130,7 +130,7 @@ def mainCalibration():
     #w,h are the width and height of the rectangle. 
     x, y, w, h = roi
     #crops the image so only VALID pixels are allowed. 
-    print("Uncropped shape: ", dst.shape)
+    #print("Uncropped shape: ", dst.shape)
     cv2.imwrite('calibresultUncropped.png', dst)
     dst = dst[y:y+h, x:x+w]
     cv2.imwrite('calibresult.png', dst)
@@ -142,7 +142,7 @@ def undistortImage(im, mapx, mapy, roi):
     dst = dst[y:y+h, x:x+w]
     print(dst.shape)
     return dst
-def loadImages(numPics, name, imSize):
+def loadImages(numPics, name, imSize, disp = False):
    
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
     listImages = []
@@ -165,12 +165,14 @@ def loadImages(numPics, name, imSize):
             continue
         objPoints.append(objp)
         #check these parameters. This refines the corners of the guess. 
+        
         corners2 = cv2.cornerSubPix(grayFrame, corners, (11,11), (-1,-1), criteria)
         imgPoints.append(corners2)
         listImages.append(frame)
-        cv2.drawChessboardCorners(frame, imSize, corners2, ret)
-        cv2.imshow("img", frame)
-        cv2.waitKey(500)
+        if disp:
+            cv2.drawChessboardCorners(frame, imSize, corners2, ret)
+            cv2.imshow("img", frame)
+            cv2.waitKey(500)
     return listImages, objPoints, imgPoints
         
 def captureImages():

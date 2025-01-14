@@ -314,9 +314,9 @@ def poseEstimationFromEss(E,  points1, points2):
     #the assuption is E = diag(1,1, 0)V^T but this isn't really true. However U and V should be close. 
     U, S, VT =  np.linalg.svd(E, full_matrices = True)
     print("S is: ", S)
-   
-    R1 = U@W@VT
-    R2 = U@W.T@VT
+    #MULTIPLYING BY -1 here got the determinant of rotation matrix to be +1. 
+    R1 = -1*U@W@VT
+    R2 = -1*U@W.T@VT
     Se = U@Z@U.T
     t1 = U[:, 2]
     t2= -t1
@@ -347,7 +347,7 @@ def poseEstimationFromEss(E,  points1, points2):
     print("td point2 : ", tdpoint2)
     print(R1.T@(p2[:, np.newaxis] - t1[:, np.newaxis]))
     #somehow need to check which ones work. 
-    return R2, t1
+    return R1, t1
 def checkProjectionOnPointPair():
     return
 

@@ -4,8 +4,10 @@ import requests
 from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
-from camGeom import calculate_essential_matrix,estimateEssentialMatrix, poseEstimationFromEss,normalizeHomogenousCoordinates, checkEpipolarConstraint, computeDLT, estimate_fundamental_matrix
+from camGeom import calculate_essential_matrix,estimateEssentialMatrix, poseEstimationFromEss,normalizeHomogenousCoordinates, checkEpipolarConstraint, computeDLT
 from calibrate import mainCalibration, undistortImage
+from camGeomRepeat import estimate_fundamental_matrix
+
 import math
 
 def doVisualOdometry():
@@ -22,7 +24,7 @@ def doVisualOdometry():
     
     REVIEW EPIPOLAR PROJECTION. 
     """
-    numKeypoints = 1000
+    numKeypoints = 400
     orb = cv2.ORB_create(nfeatures = numKeypoints)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     numPics =2
@@ -70,13 +72,8 @@ def doVisualOdometry():
            
             F = np.linalg.inv(newK.T) @ E @ np.linalg.inv(newK)
             print("F: ", F)
-            #THIS ONE IS CORRECT. 
-            Fa = estimate_fundamental_matrix(points1[0:100], points2[0:100])
-            print("Fa: ", Fa)
-            Ea = newK.T@Fa@newK
-
-            plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], points1[0:100], points2[0:100], Fa)
-            plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], points1[0:100], points2[0:100], F)
+            
+            plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], points1, points2, F)
             #get real R and t: 
             R, t = poseEstimationFromEss(E, hom1, hom2)
             #roll, pitch, yaw = rotation_matrix_to_rpy(-R)
@@ -108,9 +105,12 @@ def doVisualOdometry():
             #want this to be 3d coords for each point. 
             #CHECK DLT METHOD, ALMOST SURE PROBLEM RELATED TO THAT. 
             #X = computeDLT(np.concatenate([points1adj, np.ones(shape=(points1adj.shape[0], 1))], axis=1), np.concatenate([points2adj, np.ones(shape=(points2adj.shape[0], 1))], axis=1), P1, P2)
-            X = computeDLT(hom1adj, hom2adj, extMat1, extMat2)
-            print("X: ", X)
-            visualize_3d_points_and_cameras(X[:, 0:3], [(np.identity(3), np.zeros(shape = (3,))), (R, t)])
+            
+            points3d = cv2.triangulatePoints(projMatr1=P1, projMatr2 = P2, projPoints1 = points1.T, projPoints2 = points2.T).T
+            print(points3d.shape)
+           # X = computeDLT(hom1adj, hom2adj, extMat1, extMat2)
+            #print("X: ", X)
+            #visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, t)])
             #triangles.append[X]
         listKeypoints.append(kp1)
         listDescriptors.append(des1)
@@ -121,12 +121,15 @@ def testMatrix(K):
     #this is written as z x y
     #worldPoints = np.array([[1,1,1],[1,-1, 1], [1,1,0], [1,-1, 0], [.5, 1, 1], [0, -1, 1], [1,0,0], [1,0,1]], dtype = np.float64)
     #worldPoints[:, :] = worldPoints[:, [1, 2, 0]]
-    worldPoints = np.array(1)
+    #x y z. X is right l eft. y is forward toward monitor. Z is up. 
+    worldPoints = np.array([[1,1,1], [1,1,0], [-1,1, 1], [-1,1,0], [0, 1, 0], [0, 1, 1], [0, .5, 0],[.5, .5, 1], [-.5, .5, 1], [0, .5, 1]])
     print(worldPoints)
     print(worldPoints.shape)
     #not sure about right handedness or left handedness of coordinate system. 
     #origin  of Camera relative to world. pab. 
     #3x1
+
+
     Ct1 = np.array([-1, 0, .5], dtype = np.float64)[:, np.newaxis]
     #coordinates of camera 1 in terms of basis of World. rx ry rz
     rx = np.array([1,-.5, -.5], dtype = np.float64)
@@ -140,6 +143,7 @@ def testMatrix(K):
     print(np.dot(rx,ry))
     print(np.dot(ry,rz))
     print("Ry: ", ry)
+    assert(np.dot(rx,ry) == 0 and np.dot(ry, rz) == 0 and np.dot(rx, rz) == 0)
     #Rab. Have xa
     Rwc1 = np.stack([rx, ry, rz],axis=1)
     print("Rwc1: ", Rwc1)
@@ -147,27 +151,30 @@ def testMatrix(K):
     #so, Rab.T(xa - pab) = xb
     #multiply by Rwc1.T on right = mult by Rwc1 on left. 
     #THIS IS RIGHT. 
+    
     cam1Points = (worldPoints - Ct1.T)@Rwc1
     R1cam = Rwc1.T
     t1 = (-Rwc1.T@Ct1)[:, 0]
     print(cam1Points[0, 0]*rx + cam1Points[0, 1]*ry + cam1Points[0, 2]*rz + Ct1.T)
-    Ct2 = np.array([1,.5, 0], np.float64)[:, np.newaxis]
-    rx = np.array([1, 0, 1], np.float64)
+
+    Ct2 = np.array([1,.25, 0], np.float64)[:, np.newaxis]
+    rx = np.array([0,0,1], np.float64)
     rx/= np.linalg.norm(rx)
-    ry = np.array([0,1,0], np.float64)
-    rz = np.array([-1, 0, 1],dtype = np.float64)
+    ry = np.array([1,1,0], np.float64)
+    ry/=np.linalg.norm(ry)
+    rz = np.array([-1, 1, 0],dtype = np.float64)
     rz/=np.linalg.norm(rz)
     assert(np.dot(rx,ry) == 0 and np.dot(ry, rz) == 0 and np.dot(rx, rz) == 0)
     Rwc2 = np.stack([rx, ry, rz], axis=1)
     print("here: ", Rwc2)
     cam2Points = (worldPoints - Ct2.T)@Rwc2
-    print(cam2Points[0, 0]*rx + cam2Points[0, 1]*ry + cam2Points[0, 2]*rz + Ct2.T)
+    print("cam points thing: ", cam2Points[0, 0]*rx + cam2Points[0, 1]*ry + cam2Points[0, 2]*rz + Ct2.T)
     R2cam = Rwc2.T
     t2 = (-Rwc2.T@Ct2)[:, 0]
-    print(cam1Points)
-    print(cam2Points)
-    visualize_3d_points_and_cameras(worldPoints, [(np.identity(3), np.zeros(shape = (3,))), (R1cam, t1)])
-    visualize_3d_points_and_cameras(worldPoints, [(np.identity(3), np.zeros(shape = (3,))),(R2cam, t2)])
+    I  = np.identity(3)
+    z = np.zeros(shape = (3,))
+    visualize_3d_points_and_cameras(worldPoints, [(I, z), (R1cam, t1)])
+    visualize_3d_points_and_cameras(worldPoints, [(I,z),(R2cam, t2)])
     visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R2cam, t2)])
     homWorld = np.concatenate([worldPoints, np.ones((worldPoints.shape[0], 1))], axis=1)
     print(homWorld)
@@ -192,20 +199,28 @@ def testMatrix(K):
     normCoords1= proj1 @ np.linalg.inv(K).T
     normCoords2 = proj2 @ np.linalg.inv(K).T
     print()
-    F = estimate_fundamental_matrix(proj1[:, 0:2], proj2[:, 0:2])
+    #F = estimate_fundamental_matrix(proj1[:, 0:2], proj2[:, 0:2])
     #E, R, t =  calculate_essential_matrix(normCoords1, normCoords2)
     E = estimateEssentialMatrix(normCoords1, normCoords2)
-    Fh = K.T@E@K
-    print(Fh)
+    F = np.linalg.inv(K.T) @ E @ np.linalg.inv(K)
+    print(proj1.shape)
+    print(proj2.shape)
+    #Check epipolar constraint.
+    print(np.diag(proj2@F@proj1.T))
+ 
     print(F)
-    print(proj2[0, 0:3][np.newaxis, :] @ F @ proj1[0, 0:3][:, np.newaxis])
-    print(proj2[0, 0:3][np.newaxis, :]@Fh@proj1[0, 0:3][:, np.newaxis])
-
     R, t = poseEstimationFromEss(E, normCoords1, normCoords2)
-    visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis])[0] +  t)])
+    #once I get R and t of second coords relative to the first one. I think it's the secon d] 
 
+    #WITH SCALING THIS WORKS. Makes sense because we get a value for t without knowing the specific distances? 
+    #essential matrix doesn't provide scale. 
+    s = 2
+    visualize_3d_points_and_cameras(worldPoints, [(I, z), (R, s*t)])
+    visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
+    TDCoords = computeDLT(normCoords1, normCoords2, P1, P2)
+    #print(TDCoords)
+    visualize_3d_points_and_cameras(TDCoords, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
 
-    assert(False)
 def loadImages(name, numIm):#
     listFrames = []
     for i in range(numIm):
@@ -354,13 +369,15 @@ def plot_camera(ax, R, t, scale=0.1, color='blue'):
         color: Color of the camera frame.
     """
     # Camera center in world coordinates
+    print("T: ", t)
     camera_center = -R.T @ t
+    print("Cam center: ", camera_center)
 
     # Camera axes
     x_axis = camera_center + scale * R.T @ np.array([1, 0, 0])
     y_axis = camera_center + scale * R.T @ np.array([0, 1, 0])
     z_axis = camera_center + scale * R.T @ np.array([0, 0, 1])
-
+    print(R.T)
     # Plot the camera center
     ax.scatter(*camera_center, c=color, label='Camera Center')
 
