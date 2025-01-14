@@ -202,10 +202,9 @@ def estimateEssentialMatrix(points1, points2):
     return E_matrix
 def checkEpipolarConstraint(points1, points2, E):
 
-    tol = .001
+    tol = .1
     #think i had this backwards. 
     epiCheck = np.diag(points2@ E @ points1.T)
-    print(epiCheck)
     booleanCheck = np.abs(epiCheck) <=tol
     return booleanCheck
 def computeDLT(points1, points2, P1, P2):
@@ -227,6 +226,11 @@ def computeDLT(points1, points2, P1, P2):
     #elementwise need 0,1 = -x[2] 0, 2 x[1] 1,2 = -x[0]
     #this allows us to write A as x1' mat @P1 
     print("Points 1 shape: ", points1.shape)
+    ones = np.ones(shape = (points1.shape[0],1))
+    #points1, T1 = normalize_coordinates(points1[:, 0:2], math.sqrt(2))
+    #points2, T2 = normalize_coordinates(points2[:, 0:2], math.sqrt(2))
+   # points1a = np.hstack((points1, ones))
+    #points2a = np.hstack((points2, ones))
     #check this first
     points1Alt = computeLinCrossMulti(points1)
     points2Alt = computeLinCrossMulti(points2)
@@ -269,6 +273,7 @@ def computeDLT(points1, points2, P1, P2):
     #once we have these, we have a point cloud. 
     #should be 4 dimensional. 
     X = solns / (solns[:, -1][:, np.newaxis])
+
     return X
 
 
@@ -306,6 +311,7 @@ def poseEstimationFromEss(E,  points1, points2):
     So 4 choices for second camera matrix. 2 choices for R, + or - for t. 
 
     To test if point in front of both cameras, do we need to take two inner products and the one which are both positive works. 
+    GOT THE VAULUES FOR R TO WORK, BUT t isn't working exactly. 
     """
     #orthogonal. 
     W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
@@ -347,6 +353,8 @@ def poseEstimationFromEss(E,  points1, points2):
     print("td point2 : ", tdpoint2)
     print(R1.T@(p2[:, np.newaxis] - t1[:, np.newaxis]))
     #somehow need to check which ones work. 
+    #R1 and t1 work for my example. 
+    print("det : ", np.linalg.det(R1))
     return R1, t1
 def checkProjectionOnPointPair():
     return

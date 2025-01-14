@@ -24,7 +24,7 @@ def doVisualOdometry():
     
     REVIEW EPIPOLAR PROJECTION. 
     """
-    numKeypoints = 400
+    numKeypoints = 10000
     orb = cv2.ORB_create(nfeatures = numKeypoints)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     numPics =2
@@ -43,16 +43,16 @@ def doVisualOdometry():
     for i in range(numPics):
         frame = listImages[i]
         
-        frame= undistortImage(frame, mapx, mapy, roi).astype(np.uint8)
-        undistortedImages.append(frame)
-        grayFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        undi= undistortImage(frame, mapx, mapy, roi).astype(np.uint8)
+        undistortedImages.append(undi)
+        grayFrame = cv2.cvtColor(undi, cv2.COLOR_BGR2GRAY)
         kp1, des1 = orb.detectAndCompute(grayFrame, None)
         if len(listKeypoints) != 0: 
             
             kp2 = listKeypoints[-1]
             des2 = listDescriptors[-1]
             points1, points2 = getImMatches(kp1, des1, kp2, des2, bf)
-            display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1[0:300, :], points2[0:300, :])
+            display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1, points2)
             print("points 1 shape: ", points1.shape)
             print("new k shape: ", newK.shape)
             print(points1[0:10])
@@ -78,24 +78,25 @@ def doVisualOdometry():
             R, t = poseEstimationFromEss(E, hom1, hom2)
             #roll, pitch, yaw = rotation_matrix_to_rpy(-R)
             
-            
+            print(np.diag(hom2p@F@hom1p.T))
             goodPoints = checkEpipolarConstraint(hom1, hom2, E)
             print("good points shape: ", goodPoints.shape)
-            print("Good points: ", goodPoints)
             print(points1)
             print(points1.shape)
             
             points1adj = points1[goodPoints]
-            print("points1 adj: ", points1adj)
             points2adj = points2[goodPoints]
+            hom1padj = hom1p[goodPoints]
+            hom2padj = hom2p[goodPoints]
             hom1adj = hom1[goodPoints]
             hom2adj = hom2[goodPoints]
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1adj, points2adj)
             #at this point I think the essential matrix and R and t are right, at least plausible. 
             #only wrong thing could be 
+            s = 1
             extMat1 = np.concatenate([np.identity(3),np.zeros(shape = (3,1))], axis=1)
 
-            extMat2 = np.concatenate([R, t[:, np.newaxis]], axis=1)
+            extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
             #be careful about definitions of R and t, specifically the ordering of which rotates into which. 
             P1 = newK@extMat1
             P2 = newK@extMat2
@@ -106,17 +107,31 @@ def doVisualOdometry():
             #CHECK DLT METHOD, ALMOST SURE PROBLEM RELATED TO THAT. 
             #X = computeDLT(np.concatenate([points1adj, np.ones(shape=(points1adj.shape[0], 1))], axis=1), np.concatenate([points2adj, np.ones(shape=(points2adj.shape[0], 1))], axis=1), P1, P2)
             
-            points3d = cv2.triangulatePoints(projMatr1=P1, projMatr2 = P2, projPoints1 = points1.T, projPoints2 = points2.T).T
-            print(points3d.shape)
-           # X = computeDLT(hom1adj, hom2adj, extMat1, extMat2)
-            #print("X: ", X)
-            #visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, t)])
+            points3d = cv2.triangulatePoints(projMatr1=P1, projMatr2 = P2, projPoints1 = points1adj.T, projPoints2 = points2adj.T).T
+            #print(points3d.shape)
+            X = computeDLT(hom1padj, hom2padj, extMat1, extMat2)
+            Xn = normalizeX(X)
+            print("X: ", Xn)
+            visualize_3d_points_and_cameras(X[0:1], [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+            visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
             #triangles.append[X]
         listKeypoints.append(kp1)
         listDescriptors.append(des1)
+def normalizeX(X):
+    avg = np.mean(X)
+    s = np.std(X)
+    print(avg)
+    print(s)
+    norm = (X-avg)/s 
+    print(norm.shape)
+    average = np.linalg.norm(norm, axis=-1)
+    print(average)
+    Xn = X[np.abs(average) <= 3]
+    return Xn
 def testMatrix(K):
     """
-    Had problems because some points were on the principal plane. 
+    Had problems because some points were on the principal plane
+    GOT EVERYTHING TO WORK BY NOT PUTTING IN NORMALIZED COORDS INTO DLT. 
     """
     #this is written as z x y
     #worldPoints = np.array([[1,1,1],[1,-1, 1], [1,1,0], [1,-1, 0], [.5, 1, 1], [0, -1, 1], [1,0,0], [1,0,1]], dtype = np.float64)
@@ -217,8 +232,8 @@ def testMatrix(K):
     s = 2
     visualize_3d_points_and_cameras(worldPoints, [(I, z), (R, s*t)])
     visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
-    TDCoords = computeDLT(normCoords1, normCoords2, P1, P2)
-    #print(TDCoords)
+    TDCoords = computeDLT(proj1, proj2, P1, P2)
+
     visualize_3d_points_and_cameras(TDCoords, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
 
 def loadImages(name, numIm):#
@@ -257,7 +272,7 @@ def rotation_matrix_to_rpy(R):
 def getImMatches(kp1, des1, kp2, des2, bf):
     matches = bf.match(des1, des2)
     matches = sorted(matches, key=lambda x: x.distance)
-
+    
     # Extract matched keypoints
     list_kp1 = [kp1[mat.queryIdx].pt for mat in matches]
     list_kp2 = [kp2[mat.trainIdx].pt for mat in matches]
