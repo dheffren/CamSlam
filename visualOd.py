@@ -32,7 +32,7 @@ def doVisualOdometry():
     imSize = (15,22)
     #calibrate somehow. Do i need the intrinsic matrix? 
     listImages = loadImages(location, 2)
-    #listImages = listImages[::-1]
+    listImages = listImages[::-1]
     #nEED TO UNDISTORT THE IMAGES and gray as well. 
     K, newK, mapx, mapy, roi, rvecs, tvecs = mainCalibration()
     #testMatrix(newK)
@@ -55,27 +55,29 @@ def doVisualOdometry():
             #points1 = points1[0:100]
             #points2 = points2[0:100]
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1, points2)
-            print("points 1 shape: ", points1.shape)
-            print("new k shape: ", newK.shape)
-            print(points1[0:10])
-            print(points2[0:10])
             #forgot inverse here initially. 
             hom1p = np.concatenate([points1, np.ones(shape=(points1.shape[0], 1))], axis=1)
             hom2p = np.concatenate([points2, np.ones(shape=(points1.shape[0], 1))], axis=1)
             hom1 = hom1p @ np.linalg.inv(newK).T
             hom2 = hom2p @ np.linalg.inv(newK).T
             #
-            print("hom1: ", hom1[0:10])
-            print("hom2: ", hom2[0:10])
+            F, mask = cv2.findFundamentalMat(points1, points2, cv2.FM_RANSAC)
+            E = newK.T @ F @ newK
+            inliers1 = points1[mask.ravel() == 1]
+            inliers2 = points2[mask.ravel() == 1]
+
             #it's actually more complicated to compute R and t, 4 possible options. Need to address this by choosing ones such that keypoints in front of BOTH cameras. 
             #E, R, t = calculate_essential_matrix(hom1[0:100], hom2[0:100])
-            E= estimateEssentialMatrix(hom1, hom2)
+            #E= estimateEssentialMatrix(hom1, hom2)
             #THIS FORMULA IS WRONG. Needs to be newK @ E @ newK.T
            
-            F = np.linalg.inv(newK.T) @ E @ np.linalg.inv(newK)
+            #F = np.linalg.inv(newK.T) @ E @ np.linalg.inv(newK)
+            #inliers1 = points1
+            #inliers2 = points2
             print("F: ", F)
-            
-            plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], points1, points2, F)
+            lines = cv2.computeCorrespondEpilines(inliers1,1, F = F)
+            print(lines)
+            plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], inliers1, inliers2, F)
             #get real R and t: 
 
             goodPoints = checkEpipolarConstraint(hom1, hom2, E)
@@ -87,6 +89,10 @@ def doVisualOdometry():
             hom2padj = hom2p[goodPoints]
             hom1adj = hom1[goodPoints]
             hom2adj = hom2[goodPoints]
+            homin1p =  np.concatenate([inliers1, np.ones(shape=(inliers1.shape[0], 1))], axis=1)
+            homin2p=  np.concatenate([inliers2, np.ones(shape=(inliers2.shape[0], 1))], axis=1)
+            homin1 = homin1p@np.linalg.inv(newK).T
+            homin2 = homin2p@np.linalg.inv(newK).T
             print("adj shape: ", points1adj.shape)
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1adj, points2adj)
             #at this point I think the essential matrix and R and t are right, at least plausible. 
@@ -94,7 +100,7 @@ def doVisualOdometry():
             s = 1
             extMat1 = np.concatenate([np.identity(3),np.zeros(shape = (3,1))], axis=1)
             P1 = newK@extMat1
-            R1, R2, t1, t2 = poseEstimationFromEss(E, hom1, hom2)
+            R1, R2, t1, t2 = poseEstimationFromEss(E, homin1, homin2)
             Rl = [R1, R2]
             tl = [t1, t2]
             count = []
@@ -103,12 +109,13 @@ def doVisualOdometry():
                 t = tl[i>1]
                 extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
                 P2 = newK@extMat2
-                X = computeDLT(hom1padj, hom2padj, P1, P2)
+                #X = computeDLT(hom1padj, hom2padj, P1, P2)
+                X = computeDLT(homin1p, homin2p, P1, P2)
                 depth = (X@ R.T + s*t)[:, 2]
                 otherDepth = X[:, 2]
                 #print("OTher depth: ", otherDepth)
                 val = np.sum(np.logical_and(depth>=0, otherDepth>=0))
-               # print(val)
+                print(val)
                 count.append(val)
                 visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
             countArr = np.array(count)
@@ -120,7 +127,7 @@ def doVisualOdometry():
             t = tl[i>1]
             extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
             P2 = newK@extMat2
-            X = computeDLT(hom1padj, hom2padj, P1, P2)
+            X = computeDLT(homin1p, homin2p, P1, P2)
             visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
 
         
@@ -129,7 +136,7 @@ def doVisualOdometry():
             
             points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = hom1adj[:, 0:2].T, projPoints2 = hom2adj[:, 0:2].T).T
 
-            visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+            #visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
             #triangles.append[X]
         listKeypoints.append(kp1)
         listDescriptors.append(des1)
@@ -259,7 +266,7 @@ def testMatrix(K):
 def loadImages(name, numIm):#
     listFrames = []
     for i in range(numIm):
-        fullName = name + str(i) + ".jpg"
+        fullName = name + str(i+2) + ".jpg"
         frame = cv2.imread(fullName)
         print("frame shape: ", frame.shape)
         listFrames.append(frame)
@@ -306,6 +313,12 @@ def getImMatches(kp1, des1, kp2, des2, bf):
     points1 = combine_reduce[:, 0:2]
     points2 = combine_reduce[:, -2:]
     return points1, points2
+
+def myPlotEpi(image1, image2, points1, points2, F):
+    lines = points1 @ F.T
+    lines
+    image2_with_lines = image2.copy()
+
 def plot_epipolar_lines(image1, image2, points1,points2, F):
     """
     Plots epipolar lines on the second image given points in the first image and the fundamental matrix.
@@ -325,7 +338,10 @@ def plot_epipolar_lines(image1, image2, points1,points2, F):
     points1_homogeneous = np.hstack([points1, np.ones((points1.shape[0], 1))])  # Convert to homogeneous coordinates
     epilines2 = F @ points1_homogeneous.T  # Compute epipolar lines in the second image
     epilines2 = epilines2.T  # Shape: Nx3
-
+    square = np.sqrt(np.sum((epilines2**2)[:, 0:2], axis=-1))
+    print(epilines2)
+    epilines2 = epilines2/square[:, np.newaxis]
+    print(epilines2)
     # Plot the epipolar lines on the second image
     image2_with_lines = image2.copy()
     for r in epilines2:
