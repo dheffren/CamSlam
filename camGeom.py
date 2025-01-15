@@ -236,7 +236,7 @@ def computeDLT(points1, points2, P1, P2):
     #check this first
     points1Alt = computeLinCrossMulti(points1)
     points2Alt = computeLinCrossMulti(points2)
-
+    
     print("Points1Alt: ", points1Alt[0:10])
     print("points1AltShape: ", points1Alt.shape)
     #cut out last row because lin combo of the first two. 
@@ -251,7 +251,26 @@ def computeDLT(points1, points2, P1, P2):
     pointsMat = np.concatenate([points1Mat, points2Mat], axis=1)
     print("Points mat shape: ", pointsMat.shape)
     #NOW: Want to solve AX = 0 where X is the homogenous 3d point. 
+    
     #use least squares. Right singular vector of A corresponding to smallest singular value. 
+    """
+    #gets the right answer. 
+    points3d = []
+    for i in range(points1Alt.shape[0]):
+        print(points1[i])
+        u1, v1, _ = points1[i]
+        u2,v2,_ = points2[i]
+        A = np.zeros((4,4))
+        A[0] = u1 * P1[2] - P1[0]
+        A[1] = v1 * P1[2] - P1[1]
+        A[2] = u2 * P2[2] - P2[0]
+        A[3] = v2 * P2[2] - P2[1]
+        _, _, V = np.linalg.svd(A)
+        X = V[-1]
+        points3d.append(X)
+    Xalt = np.array(points3d)
+    print(Xalt)
+    """
     U, S, VT = np.linalg.svd(pointsMat)
 
     #
@@ -264,7 +283,7 @@ def computeDLT(points1, points2, P1, P2):
     #should be 4 dimensional. 
     X = solns / (solns[:, -1][:, np.newaxis])
     
-    return X[:, 0:3]
+    return X
 
 
 def computeLinCrossMulti(points):

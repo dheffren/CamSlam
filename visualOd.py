@@ -35,7 +35,7 @@ def doVisualOdometry():
     listImages = listImages[::-1]
     #nEED TO UNDISTORT THE IMAGES and gray as well. 
     K, newK, mapx, mapy, roi, rvecs, tvecs = mainCalibration()
-    #testMatrix(newK)
+    testMatrix(newK)
     listKeypoints = []
     listDescriptors = []
     triangles = []
@@ -97,7 +97,7 @@ def doVisualOdometry():
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1adj, points2adj)
             #at this point I think the essential matrix and R and t are right, at least plausible. 
             #only wrong thing could be 
-            s = 1
+            s = 2
             extMat1 = np.concatenate([np.identity(3),np.zeros(shape = (3,1))], axis=1)
             P1 = newK@extMat1
             R1, R2, t1, t2 = poseEstimationFromEss(E, homin1, homin2)
@@ -110,7 +110,7 @@ def doVisualOdometry():
                 extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
                 P2 = newK@extMat2
                 #X = computeDLT(hom1padj, hom2padj, P1, P2)
-                X = computeDLT(homin1p, homin2p, P1, P2)
+                X = computeDLT(homin1p, homin2p, P1, P2)[:, 0:3]
                 depth = (X@ R.T + s*t)[:, 2]
                 otherDepth = X[:, 2]
                 #print("OTher depth: ", otherDepth)
@@ -127,7 +127,12 @@ def doVisualOdometry():
             t = tl[i>1]
             extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
             P2 = newK@extMat2
-            X = computeDLT(homin1p, homin2p, P1, P2)
+            depth = (X@ R.T + s*t)[:, 2]
+            otherDepth = X[:, 2]
+            #print("OTher depth: ", otherDepth)
+            #remove ones not in camera view. 
+            val = np.where(np.logical_and(depth>=0, otherDepth>=0))
+            X = computeDLT(homin1p, homin2p, P1, P2)[:, 0:3]
             visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
 
         
@@ -246,23 +251,56 @@ def testMatrix(K):
     print(proj2.shape)
     #Check epipolar constraint.
     print(np.diag(proj2@F@proj1.T))
- 
+    s = 2
     print(F)
-    R, t = poseEstimationFromEss(E, normCoords1, normCoords2)
+    R1,R2, t1, t2 = poseEstimationFromEss(E, normCoords1, normCoords2)
+    Rl = [R1, R2]
+    tl = [t1, t2]
+    count = []
+    for i in range(4):
+        R = Rl[i%2]
+        t = tl[i>1]
+        extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
+        P2 = K@extMat2
+        #X = computeDLT(hom1padj, hom2padj, P1, P2)
+        X = computeDLT(proj1, proj2, P1, P2)[:, 0:3]
+        depth = (X@ R.T + s*t)[:, 2]
+        otherDepth = X[:, 2]
+        #print("OTher depth: ", otherDepth)
+        val = np.sum(np.logical_and(depth>=0, otherDepth>=0))
+        print(val)
+        count.append(val)
+        visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+    
     #once I get R and t of second coords relative to the first one. I think it's the secon d] 
-
+    countArr = np.array(count)
+    maxCount = np.max(countArr)
+    i = np.argmax(countArr)
+    print("Max count: ", maxCount)          
+    print("i: ", i)
+    R = Rl[i%2]
+    t = tl[i>1]
     #WITH SCALING THIS WORKS. Makes sense because we get a value for t without knowing the specific distances? 
     #essential matrix doesn't provide scale. 
-    s = 2
+    Rp = R @ R1cam
+    tp = (R@ t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
+    extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
+    #extMat1 = np.concatenate([np.identity(3), np.zeros((3,1))], axis=1)
+    #P1 = K@extMat1
+    P2 = K@extMat2
     visualize_3d_points_and_cameras(worldPoints, [(I, z), (R, s*t)])
     visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
     TDCoords = computeDLT(proj1, proj2, P1, P2)
-    extA =  np.concatenate([R, s*t[:, np.newaxis]], axis=1)
+    print(TDCoords)
+    pixels1 = TDCoords @ P1.T
+    print(pixels1)
+    pixels2 = TDCoords @ P2.T
+    print(pixels2)
     #doesn't work well.
     points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = normCoords1[:, 0:2].T, projPoints2 = normCoords2[:, 0:2].T).T
     print(points3d)
-    visualize_3d_points_and_cameras(points3d, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
-
+    visualize_3d_points_and_cameras(TDCoords, [(R1cam, t1),(Rp, tp)])
+    
 def loadImages(name, numIm):#
     listFrames = []
     for i in range(numIm):
