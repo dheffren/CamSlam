@@ -28,13 +28,15 @@ def doVisualOdometry():
     orb = cv2.ORB_create(nfeatures = numKeypoints)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     numPics =2
-    location = "motionImages/image"
+    location = "motionImages/frame"
     imSize = (15,22)
     #calibrate somehow. Do i need the intrinsic matrix? 
     listImages = loadImages(location, 2)
     listImages = listImages[::-1]
     #nEED TO UNDISTORT THE IMAGES and gray as well. 
     K, newK, mapx, mapy, roi, rvecs, tvecs = mainCalibration()
+    print(newK)
+    
     testMatrix(newK)
     listKeypoints = []
     listDescriptors = []
@@ -60,7 +62,7 @@ def doVisualOdometry():
             hom2p = np.concatenate([points2, np.ones(shape=(points1.shape[0], 1))], axis=1)
             hom1 = hom1p @ np.linalg.inv(newK).T
             hom2 = hom2p @ np.linalg.inv(newK).T
-            #
+            # Their method is MUCH better than mine. 
             F, mask = cv2.findFundamentalMat(points1, points2, cv2.FM_RANSAC)
             E = newK.T @ F @ newK
             inliers1 = points1[mask.ravel() == 1]
@@ -74,9 +76,9 @@ def doVisualOdometry():
             #F = np.linalg.inv(newK.T) @ E @ np.linalg.inv(newK)
             #inliers1 = points1
             #inliers2 = points2
-            print("F: ", F)
+            #print("F: ", F)
             lines = cv2.computeCorrespondEpilines(inliers1,1, F = F)
-            print(lines)
+            #print(lines)
             plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], inliers1, inliers2, F)
             #get real R and t: 
 
@@ -93,14 +95,20 @@ def doVisualOdometry():
             homin2p=  np.concatenate([inliers2, np.ones(shape=(inliers2.shape[0], 1))], axis=1)
             homin1 = homin1p@np.linalg.inv(newK).T
             homin2 = homin2p@np.linalg.inv(newK).T
-            print("adj shape: ", points1adj.shape)
+            
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1adj, points2adj)
-            #at this point I think the essential matrix and R and t are right, at least plausible. 
-            #only wrong thing could be 
-            s = 2
-            extMat1 = np.concatenate([np.identity(3),np.zeros(shape = (3,1))], axis=1)
+            s = 10
+            R1c = np.identity(3)
+            t1c = np.zeros((3,))
+            extMat1 = np.concatenate([R1c, t1c[:, np.newaxis]], axis=1)
             P1 = newK@extMat1
             R1, R2, t1, t2 = poseEstimationFromEss(E, homin1, homin2)
+            disp = True
+            P2, R2c, t2c = poseEstimation(hom1padj, hom2padj, R1, R2, t1, t2, P1, newK, None, s, disp)
+            X = computeDLT(hom1padj, hom2padj, P1, P2)
+            
+            visualize_3d_points_and_cameras(X[:, 0:3], [(R1c, t1c), (R2c, t2c)])
+            """
             Rl = [R1, R2]
             tl = [t1, t2]
             count = []
@@ -127,6 +135,8 @@ def doVisualOdometry():
             t = tl[i>1]
             extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
             P2 = newK@extMat2
+         
+
             depth = (X@ R.T + s*t)[:, 2]
             otherDepth = X[:, 2]
             #print("OTher depth: ", otherDepth)
@@ -139,9 +149,10 @@ def doVisualOdometry():
             #want this to be 3d coords for each point. 
      
             
-            points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = hom1adj[:, 0:2].T, projPoints2 = hom2adj[:, 0:2].T).T
+           # points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = hom1adj[:, 0:2].T, projPoints2 = hom2adj[:, 0:2].T).T
 
             #visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+            """
             #triangles.append[X]
         listKeypoints.append(kp1)
         listDescriptors.append(des1)
@@ -176,10 +187,10 @@ def testMatrix(K):
 
     Ct1 = np.array([-1, 0, .5], dtype = np.float64)[:, np.newaxis]
     #coordinates of camera 1 in terms of basis of World. rx ry rz
-    rx = np.array([1,-.5, -.5], dtype = np.float64)
+    rx = np.array([1,-.5, -.5], dtype = np.float32)
     rx/=np.linalg.norm(rx)
     #z going up forward and right. 
-    rz = np.array([1,1,1], dtype = np.float64)
+    rz = np.array([1,1,1], dtype = np.float32)
     rz/= np.linalg.norm(rz)
     print("dot: ", np.dot(rx, rz))
     ry = np.cross(rz, rx)
@@ -187,7 +198,7 @@ def testMatrix(K):
     print(np.dot(rx,ry))
     print(np.dot(ry,rz))
     print("Ry: ", ry)
-    assert(np.dot(rx,ry) == 0 and np.dot(ry, rz) == 0 and np.dot(rx, rz) == 0)
+    assert(np.dot(rx,ry) == 0.0 and np.dot(ry, rz) == 0.0 and np.dot(rx, rz) == 0.0)
     #Rab. Have xa
     Rwc1 = np.stack([rx, ry, rz],axis=1)
     print("Rwc1: ", Rwc1)
@@ -198,32 +209,35 @@ def testMatrix(K):
     
     cam1Points = (worldPoints - Ct1.T)@Rwc1
     R1cam = Rwc1.T
-    t1 = (-Rwc1.T@Ct1)[:, 0]
+    t1c = (-Rwc1.T@Ct1)[:, 0]
     print(cam1Points[0, 0]*rx + cam1Points[0, 1]*ry + cam1Points[0, 2]*rz + Ct1.T)
 
     Ct2 = np.array([1,.25, 0], np.float64)[:, np.newaxis]
-    rx = np.array([0,0,1], np.float64)
+    rx = np.array([0,0,1], np.float32)
     rx/= np.linalg.norm(rx)
-    ry = np.array([1,1,0], np.float64)
+    ry = np.array([1,1,0], np.float32)
     ry/=np.linalg.norm(ry)
-    rz = np.array([-1, 1, 0],dtype = np.float64)
+    rz = np.array([-1, 1, 0],dtype = np.float32)
     rz/=np.linalg.norm(rz)
+    print(np.dot(rx,ry))
+    print(np.dot(ry, rz))
+    print(np.dot(rx, rz))
     assert(np.dot(rx,ry) == 0 and np.dot(ry, rz) == 0 and np.dot(rx, rz) == 0)
     Rwc2 = np.stack([rx, ry, rz], axis=1)
     print("here: ", Rwc2)
     cam2Points = (worldPoints - Ct2.T)@Rwc2
     print("cam points thing: ", cam2Points[0, 0]*rx + cam2Points[0, 1]*ry + cam2Points[0, 2]*rz + Ct2.T)
     R2cam = Rwc2.T
-    t2 = (-Rwc2.T@Ct2)[:, 0]
+    t2c = (-Rwc2.T@Ct2)[:, 0]
     I  = np.identity(3)
     z = np.zeros(shape = (3,))
-    visualize_3d_points_and_cameras(worldPoints, [(I, z), (R1cam, t1)])
-    visualize_3d_points_and_cameras(worldPoints, [(I,z),(R2cam, t2)])
-    visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R2cam, t2)])
+    visualize_3d_points_and_cameras(worldPoints, [(I, z), (R1cam, t1c)])
+    visualize_3d_points_and_cameras(worldPoints, [(I,z),(R2cam, t2c)])
+    visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1c), (R2cam, t2c)])
     homWorld = np.concatenate([worldPoints, np.ones((worldPoints.shape[0], 1))], axis=1)
     print(homWorld)
-    extMat1 = np.concatenate([R1cam, t1[:, np.newaxis]], axis=1)
-    extMat2 = np.concatenate([R2cam, t2[:, np.newaxis]], axis=1)
+    extMat1 = np.concatenate([R1cam, t1c[:, np.newaxis]], axis=1)
+    extMat2 = np.concatenate([R2cam, t2c[:, np.newaxis]], axis=1)
    # visualize_3d_points_and_cameras(X[:, 0:3], [(np.identity(3), np.zeros(shape = (3,))), (R, t)])
     print("ext mat2: ", extMat2)
     P1 = K@extMat1
@@ -253,24 +267,32 @@ def testMatrix(K):
     print(np.diag(proj2@F@proj1.T))
     s = 2
     print(F)
+
     R1,R2, t1, t2 = poseEstimationFromEss(E, normCoords1, normCoords2)
+    """
     Rl = [R1, R2]
     tl = [t1, t2]
     count = []
     for i in range(4):
         R = Rl[i%2]
         t = tl[i>1]
-        extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
+        #need this because actually P1 isn't the identity. We have R and t relative to P1. 
+        #erro;r here: t1 was getting overwritten!!!
+        Rp = R @ R1cam
+        tp = (R@ t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
+        extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
+        #extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
         P2 = K@extMat2
-        #X = computeDLT(hom1padj, hom2padj, P1, P2)
+        
         X = computeDLT(proj1, proj2, P1, P2)[:, 0:3]
-        depth = (X@ R.T + s*t)[:, 2]
-        otherDepth = X[:, 2]
+        depth = (X@ Rp.T + s*tp)[:, 2]
+        otherDepth = (X@P1.T@np.linalg.inv(K).T)[:, 2]
+        #otherDepth = X[:, 2]
         #print("OTher depth: ", otherDepth)
         val = np.sum(np.logical_and(depth>=0, otherDepth>=0))
         print(val)
         count.append(val)
-        visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+        #visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
     
     #once I get R and t of second coords relative to the first one. I think it's the secon d] 
     countArr = np.array(count)
@@ -300,11 +322,70 @@ def testMatrix(K):
     points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = normCoords1[:, 0:2].T, projPoints2 = normCoords2[:, 0:2].T).T
     print(points3d)
     visualize_3d_points_and_cameras(TDCoords, [(R1cam, t1),(Rp, tp)])
+    """
+    P2a, Rp, tp = poseEstimation(proj1, proj2, R1, R2, t1, t2, P1, K, None, s,False)
+    X = computeDLT(proj1, proj2, P1, P2a)
+    print(np.linalg.norm(X[:, 0:3] - worldPoints, axis=-1))
+    visualize_3d_points_and_cameras(X[:, 0:3], [(R1cam, t1c), (Rp, tp)])
+def poseEstimation(x1, x2,R1, R2, t1, t2, P1, K1, K2, s, disp=False):
+    """
+    x1 and x2 are pixel homogenous coordinates (already normalized)
+    R1, R2, t1, t2 are the poses we wish to test. Note these are relative to the first camera. 
+    P1 is the projection matrix of the first camera. Depending if we have a world coordinate system already set up, this may be 
+    K1, K2 are the intrinsic matrices of the cameras. 
+    """
+    if P1 is None:
+        P1 = K1 @ np.concatenate([np.identity(3), np.zeros(shape = (3,1))], axis=1)
+    if K2 is None:
+        K2 = K1
+    Rl = [R1, R2, -R1, -R2]
+    tl = [t1, t2]
+    Rt1 = np.linalg.inv(K1)@P1
+    #could do this comp more fancy, but this is simpler. 
+    R1c, t1c = Rt1[:, 0:3], Rt1[:, 3]
+    print("Det of Rc: ", np.linalg.det(R1c))
+    count = []
+    for i in range(len(Rl)):
+        for j in range(len(tl)):
+            R = Rl[i]
+            t = tl[j]
+            print("Det R: ", np.linalg.det(R))
+            #need this because actually P1 isn't the identity. We have R and t relative to P1. 
+            Rp = R @ R1c
+            tp = (R@ t1c[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
+            extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
+            P2 = K2@extMat2
+            
+            X = computeDLT(x1, x2, P1, P2)
+            #depth = (X@ Rp.T + s*tp)[:, 2]
+            depth2 = (X@P2.T@np.linalg.inv(K2).T)[:, 2]
+            depth1 = (X@P1.T@np.linalg.inv(K1).T)[:, 2]
+            print(depth2)
+            print(depth1)
+            val = np.sum(np.logical_and(depth1>=0, depth2>=0))
+            print("Num both in front: ", val)
+            count.append(val)
+            if disp:
+                visualize_3d_points_and_cameras(X, [(R1c, t1c), (Rp, tp)])
+    countArr = np.array(count)
+    maxCount = np.max(countArr)
+    i = np.argmax(countArr)
+    print("Max count: ", maxCount)          
+    print("i: ", i)
+    R = Rl[math.floor(i/len(tl))]
+    t = tl[i%len(tl)]
+    #need this because actually P1 isn't the identity. We have R and t relative to P1. 
+    Rp = R @ R1c
+    tp = (R@ t1c[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
+    extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
+    P2 = K2@extMat2
     
+    return P2, Rp, tp
+
 def loadImages(name, numIm):#
     listFrames = []
     for i in range(numIm):
-        fullName = name + str(i+2) + ".jpg"
+        fullName = name + str(i) + ".jpg"
         frame = cv2.imread(fullName)
         print("frame shape: ", frame.shape)
         listFrames.append(frame)
@@ -458,15 +539,15 @@ def plot_camera(ax, R, t, scale=0.1, color='blue'):
         color: Color of the camera frame.
     """
     # Camera center in world coordinates
-    print("T: ", t)
+   
     camera_center = -R.T @ t
-    print("Cam center: ", camera_center)
+    
 
     # Camera axes
     x_axis = camera_center + scale * R.T @ np.array([1, 0, 0])
     y_axis = camera_center + scale * R.T @ np.array([0, 1, 0])
     z_axis = camera_center + scale * R.T @ np.array([0, 0, 1])
-    print(R.T)
+  
     # Plot the camera center
     ax.scatter(*camera_center, c=color, label='Camera Center')
 

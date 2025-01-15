@@ -227,7 +227,7 @@ def computeDLT(points1, points2, P1, P2):
     """
     #elementwise need 0,1 = -x[2] 0, 2 x[1] 1,2 = -x[0]
     #this allows us to write A as x1' mat @P1 
-    print("Points 1 shape: ", points1.shape)
+    #print("Points 1 shape: ", points1.shape)
     ones = np.ones(shape = (points1.shape[0],1))
     #points1, T1 = normalize_coordinates(points1[:, 0:2], math.sqrt(2))
     #points2, T2 = normalize_coordinates(points2[:, 0:2], math.sqrt(2))
@@ -237,8 +237,8 @@ def computeDLT(points1, points2, P1, P2):
     points1Alt = computeLinCrossMulti(points1)
     points2Alt = computeLinCrossMulti(points2)
     
-    print("Points1Alt: ", points1Alt[0:10])
-    print("points1AltShape: ", points1Alt.shape)
+    #print("Points1Alt: ", points1Alt[0:10])
+    #print("points1AltShape: ", points1Alt.shape)
     #cut out last row because lin combo of the first two. 
     points1Mat = (points1Alt @ P1[np.newaxis, :, :])[:, 0:2, :]
     points2Mat = (points2Alt @ P2[np.newaxis, :, :])[:, 0:2, :]
@@ -246,10 +246,10 @@ def computeDLT(points1, points2, P1, P2):
     print(points1[0,0]*P1[2, :] - P1[0, :])
     print(points1Mat[0,0])
     print(points1Mat[0])
-    print("points1mat shape: ", points1Mat.shape)
+    #print("points1mat shape: ", points1Mat.shape)
     #nx4x4
     pointsMat = np.concatenate([points1Mat, points2Mat], axis=1)
-    print("Points mat shape: ", pointsMat.shape)
+    #print("Points mat shape: ", pointsMat.shape)
     #NOW: Want to solve AX = 0 where X is the homogenous 3d point. 
     
     #use least squares. Right singular vector of A corresponding to smallest singular value. 
@@ -276,8 +276,8 @@ def computeDLT(points1, points2, P1, P2):
     #
     #will want a ROW of VT for each. 
     solns = VT[:, -1, :]
-    print(solns.shape)
-    print("solns: ", solns)
+    #print(solns.shape)
+    #print("solns: ", solns)
     #This will get us the values for THe 3d coordinates. Then we can renormalize to get the actual 3d coordinates. 
     #once we have these, we have a point cloud. 
     #should be 4 dimensional. 
