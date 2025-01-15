@@ -201,10 +201,12 @@ def estimateEssentialMatrix(points1, points2):
     E_matrix= np.transpose(T2)@E_matrix@T1
     return E_matrix
 def checkEpipolarConstraint(points1, points2, E):
-
-    tol = .1
+    maxE = np.max(E)
+    tol = .01*maxE
     #think i had this backwards. 
     epiCheck = np.diag(points2@ E @ points1.T)
+    print("Epi check: ", epiCheck)
+    print("tol:", tol)
     booleanCheck = np.abs(epiCheck) <=tol
     return booleanCheck
 def computeDLT(points1, points2, P1, P2):
@@ -240,10 +242,10 @@ def computeDLT(points1, points2, P1, P2):
     #cut out last row because lin combo of the first two. 
     points1Mat = (points1Alt @ P1[np.newaxis, :, :])[:, 0:2, :]
     points2Mat = (points2Alt @ P2[np.newaxis, :, :])[:, 0:2, :]
+
     print(points1[0,0]*P1[2, :] - P1[0, :])
     print(points1Mat[0,0])
     print(points1Mat[0])
-    
     print("points1mat shape: ", points1Mat.shape)
     #nx4x4
     pointsMat = np.concatenate([points1Mat, points2Mat], axis=1)
@@ -251,19 +253,7 @@ def computeDLT(points1, points2, P1, P2):
     #NOW: Want to solve AX = 0 where X is the homogenous 3d point. 
     #use least squares. Right singular vector of A corresponding to smallest singular value. 
     U, S, VT = np.linalg.svd(pointsMat)
-    print(U.shape)
-    print(S.shape)
-    print(VT.shape)
-    print(U[0])
-    print(S[0])
-    print(VT[0])
-    print(U[1])
-    print(S[1])
-    print(VT[1])
-    Ua, Sa, VTa = np.linalg.svd(pointsMat[1, :, :], full_matrices=False)
-    print(Ua)
-    print(Sa)
-    print(VTa)
+
     #
     #will want a ROW of VT for each. 
     solns = VT[:, -1, :]
@@ -273,8 +263,8 @@ def computeDLT(points1, points2, P1, P2):
     #once we have these, we have a point cloud. 
     #should be 4 dimensional. 
     X = solns / (solns[:, -1][:, np.newaxis])
-
-    return X
+    
+    return X[:, 0:3]
 
 
 def computeLinCrossMulti(points):
@@ -355,7 +345,7 @@ def poseEstimationFromEss(E,  points1, points2):
     #somehow need to check which ones work. 
     #R1 and t1 work for my example. 
     print("det : ", np.linalg.det(R1))
-    return R1, t1
+    return R1, R2, t1, t2
 def checkProjectionOnPointPair():
     return
 

@@ -24,7 +24,7 @@ def doVisualOdometry():
     
     REVIEW EPIPOLAR PROJECTION. 
     """
-    numKeypoints = 10000
+    numKeypoints = 1000
     orb = cv2.ORB_create(nfeatures = numKeypoints)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     numPics =2
@@ -32,10 +32,10 @@ def doVisualOdometry():
     imSize = (15,22)
     #calibrate somehow. Do i need the intrinsic matrix? 
     listImages = loadImages(location, 2)
-   
+    #listImages = listImages[::-1]
     #nEED TO UNDISTORT THE IMAGES and gray as well. 
     K, newK, mapx, mapy, roi, rvecs, tvecs = mainCalibration()
-    testMatrix(newK)
+    #testMatrix(newK)
     listKeypoints = []
     listDescriptors = []
     triangles = []
@@ -52,6 +52,8 @@ def doVisualOdometry():
             kp2 = listKeypoints[-1]
             des2 = listDescriptors[-1]
             points1, points2 = getImMatches(kp1, des1, kp2, des2, bf)
+            #points1 = points1[0:100]
+            #points2 = points2[0:100]
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1, points2)
             print("points 1 shape: ", points1.shape)
             print("new k shape: ", newK.shape)
@@ -75,14 +77,9 @@ def doVisualOdometry():
             
             plot_epipolar_lines(undistortedImages[i], undistortedImages[i-1], points1, points2, F)
             #get real R and t: 
-            R, t = poseEstimationFromEss(E, hom1, hom2)
-            #roll, pitch, yaw = rotation_matrix_to_rpy(-R)
-            
-            print(np.diag(hom2p@F@hom1p.T))
+
             goodPoints = checkEpipolarConstraint(hom1, hom2, E)
-            print("good points shape: ", goodPoints.shape)
-            print(points1)
-            print(points1.shape)
+           
             
             points1adj = points1[goodPoints]
             points2adj = points2[goodPoints]
@@ -90,33 +87,53 @@ def doVisualOdometry():
             hom2padj = hom2p[goodPoints]
             hom1adj = hom1[goodPoints]
             hom2adj = hom2[goodPoints]
+            print("adj shape: ", points1adj.shape)
             display_keypoint_matches(undistortedImages[i], undistortedImages[i-1], points1adj, points2adj)
             #at this point I think the essential matrix and R and t are right, at least plausible. 
             #only wrong thing could be 
             s = 1
             extMat1 = np.concatenate([np.identity(3),np.zeros(shape = (3,1))], axis=1)
-
-            extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
-            #be careful about definitions of R and t, specifically the ordering of which rotates into which. 
             P1 = newK@extMat1
+            R1, R2, t1, t2 = poseEstimationFromEss(E, hom1, hom2)
+            Rl = [R1, R2]
+            tl = [t1, t2]
+            count = []
+            for i in range(4):
+                R = Rl[i%2]
+                t = tl[i>1]
+                extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
+                P2 = newK@extMat2
+                X = computeDLT(hom1padj, hom2padj, P1, P2)
+                depth = (X@ R.T + s*t)[:, 2]
+                otherDepth = X[:, 2]
+                #print("OTher depth: ", otherDepth)
+                val = np.sum(np.logical_and(depth>=0, otherDepth>=0))
+               # print(val)
+                count.append(val)
+                visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+            countArr = np.array(count)
+            maxCount = np.max(countArr)
+            i = np.argmax(countArr)
+            print("Max count: ", maxCount)          
+            print("i: ", i)
+            R = Rl[i%2]
+            t = tl[i>1]
+            extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
             P2 = newK@extMat2
-            print("P1: ", P1)
-            print("P2: ", P2)
-            print("hom 1 adj: ", hom1adj[0:10])
+            X = computeDLT(hom1padj, hom2padj, P1, P2)
+            visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+
+        
             #want this to be 3d coords for each point. 
-            #CHECK DLT METHOD, ALMOST SURE PROBLEM RELATED TO THAT. 
-            #X = computeDLT(np.concatenate([points1adj, np.ones(shape=(points1adj.shape[0], 1))], axis=1), np.concatenate([points2adj, np.ones(shape=(points2adj.shape[0], 1))], axis=1), P1, P2)
+     
             
-            points3d = cv2.triangulatePoints(projMatr1=P1, projMatr2 = P2, projPoints1 = points1adj.T, projPoints2 = points2adj.T).T
-            #print(points3d.shape)
-            X = computeDLT(hom1padj, hom2padj, extMat1, extMat2)
-            Xn = normalizeX(X)
-            print("X: ", Xn)
-            visualize_3d_points_and_cameras(X[0:1], [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
+            points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = hom1adj[:, 0:2].T, projPoints2 = hom2adj[:, 0:2].T).T
+
             visualize_3d_points_and_cameras(points3d, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
             #triangles.append[X]
         listKeypoints.append(kp1)
         listDescriptors.append(des1)
+
 def normalizeX(X):
     avg = np.mean(X)
     s = np.std(X)
@@ -233,13 +250,16 @@ def testMatrix(K):
     visualize_3d_points_and_cameras(worldPoints, [(I, z), (R, s*t)])
     visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
     TDCoords = computeDLT(proj1, proj2, P1, P2)
-
-    visualize_3d_points_and_cameras(TDCoords, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
+    extA =  np.concatenate([R, s*t[:, np.newaxis]], axis=1)
+    #doesn't work well.
+    points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = normCoords1[:, 0:2].T, projPoints2 = normCoords2[:, 0:2].T).T
+    print(points3d)
+    visualize_3d_points_and_cameras(points3d, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
 
 def loadImages(name, numIm):#
     listFrames = []
     for i in range(numIm):
-        fullName = name + str(i+2) + ".jpg"
+        fullName = name + str(i) + ".jpg"
         frame = cv2.imread(fullName)
         print("frame shape: ", frame.shape)
         listFrames.append(frame)
