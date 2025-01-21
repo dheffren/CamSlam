@@ -4,7 +4,7 @@ import requests
 from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
-from camGeom import calculate_essential_matrix,estimateEssentialMatrix, poseEstimationFromEss,normalizeHomogenousCoordinates, checkEpipolarConstraint, computeDLT
+from camGeom import calculate_essential_matrix,estimateFundamentalMatrix, poseEstimationFromEss,normalizeHomogenousCoordinates, checkEpipolarConstraint, computeDLT
 from calibrate import mainCalibration, undistortImage
 from camGeomRepeat import estimate_fundamental_matrix
 
@@ -28,7 +28,7 @@ def doVisualOdometry():
     orb = cv2.ORB_create(nfeatures = numKeypoints)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     numPics =3
-    location = "motionImages/frame"
+    location = "motionImages/image"
     imSize = (15,22)
     #calibrate somehow. Do i need the intrinsic matrix? 
     listImages = loadImages(location, numPics)
@@ -74,31 +74,28 @@ def doVisualOdometry():
     #points1, points2, query1, query2 = getImMatches(kp1, des1, kp2, des2, bf)
     #TODO: CHeck that the alt messing with the image ordering isn't what's screwing up the epipole calculation. It can't be, right? 
     keypoints1, keypoints2, query1, query2= getImMatchesAlt(kp1, des1, kp2, des2, bf)
-    #print(keypoints2s.shape)
-    print(query2)
-    print(keypoints1.shape)
-    #points1a= keypoints1[queries1.astype(bool), :]
+    
     points1 = keypoints1[query1]
-    points2 = keypoints2[query2]
-   # print(points1a)
-    print(points1)
     print(points1.shape)
-    #print(points1a.shape)
-    #points2a= keypoints2[queries2.astype(bool), :]
-    #print(points2.shape)
-    #print(points2a.shape)
-    #print(points1a[0:10])
-    #print(points1[0:10])
+    points2 = keypoints2[query2]
+    sort = points1[:, 0].argsort()
 
+    points1 = points1[sort, :]
+    points2 = points2[sort, :]
+    print(points1.shape)
+    print(points2.shape)
+    print(points1)
+    display_keypoint_matches(undistortedImages[0], undistortedImages[1], points1, points2)
+   
 
     #pose of second relative to first. 
     #note: inliers is based on the input points1, points2 size, not like queries. 
     #X, R, t, inliers = triangulate(points1, points2, undistortedImages[0], undistortedImages[1], newK, newK)
+    #Two points1, points2 and points1a and points2a get VERY different values for the epipole. Why is that? 
+    
     R, t, inliers = estRelPose(points1, points2, undistortedImages[0], undistortedImages[1], newK, newK)
-    print(inliers)
-    print(inliers.shape)
-    print(query1)
-    print(len(query1))
+    
+   
     query1 = query1[inliers]
     query2 = query2[inliers]
     listQueryPairs.append((query1, query2))
@@ -111,7 +108,7 @@ def doVisualOdometry():
         undistortedImages.append(undi)
         grayFrame = cv2.cvtColor(undi, cv2.COLOR_BGR2GRAY)
         kp2, des2 = orb.detectAndCompute(grayFrame, None)
-        #previous frame. -2 because just added another.
+        #previous frame. -2 because just added another
         kp1, des1 = listKeypoints[-1], listDescriptors[-1]
         #keypoints 1 contains a list of all keypoints for that frame. Doesn't change with matches. 
         keypoints1, keypoints2, query1, query2 = getImMatchesAlt(kp1, des1, kp2, des2, bf)
@@ -120,11 +117,16 @@ def doVisualOdometry():
         image2 = undistortedImages[i]
         points1 = keypoints1[query1]
         points2 = keypoints2[query2]
-        #
+        points1 = keypoints1[query1]
+      
+        points2 = keypoints2[query2]
+        sort = points1[:, 0].argsort()
+
+        points1 = points1[sort, :]
+        points2 = points2[sort, :]
         R, t, inliers = estRelPose(points1, points2, image1, image2, newK, newK)
         #adjust for inliers. 
-        print(inliers.shape)
-        print(inliers)
+      
         query1 = query1[inliers]
         query2 = query2[inliers]
         #maybe instead need to find correspondences between 3d and 2d. 
@@ -146,8 +148,8 @@ def doVisualOdometry():
 def triangulatePrevAndCurrentPoints(currKeypoints, currQueries, prevKeypoints, prevQueries, prevPose, currentPose, K, s = 1):
     """
     TODO: DLT is underdetermined. CHeck what needs to be changed here. We get VERY different results than what is expected. 
-    something is wrong here. 
-    INSTEAD OF CHANGING THE STUFF BEFORE DLT, DO DLT THEN CHANGTE STUFF to see which of the 3d points correspond to our two d points. 
+    something is wrong here. Is the DLT method itself wrong? Could be messing up some order here? 
+
     Step 1: Triangulate points from previous ones (assuming that world coordinates, the one before last is I 0)
     But only triangulate ones that match up with valid from THIS one. 
     Step 2: Project those points into current view. 
@@ -162,7 +164,9 @@ def triangulatePrevAndCurrentPoints(currKeypoints, currQueries, prevKeypoints, p
     key1 = pkey1
     key2 = pkey2
     key3 = ckey2
-
+    points1 = key1[pq1]
+    points2 = key2[pq2]
+    
     R1cam = np.identity(3)
     t1c = np.zeros((3,))
     R2r, t2r = prevPose
@@ -171,6 +175,7 @@ def triangulatePrevAndCurrentPoints(currKeypoints, currQueries, prevKeypoints, p
     R2cam = R2r@R1cam
     #should I have diff s values? 
     t2c = (R2r@t1c[:, np.newaxis] + s*t2r[:, np.newaxis])[:, 0]
+
     #pose of R3cam in world coordinates. 
     R3cam = R3r@R2cam
     t3c = (R3r@t2c[:, np.newaxis] + s*t3r[:, np.newaxis])[:, 0]
@@ -180,18 +185,15 @@ def triangulatePrevAndCurrentPoints(currKeypoints, currQueries, prevKeypoints, p
     P1 = K@ext1
     P2 = K@ext2
     P3 = K@ext3
-    #Need to limit the 3d points to those which are in BOTH query matches. 
-    #Need points1 and points2 to already have first pair and second pair filtered out. 
-    cqueries1 = np.zeros((ckey1.shape[0],),dtype = int)
-    cqueries2 = np.zeros((ckey2.shape[0],), dtype = int)
-    cqueries1[cq1] = 1
-    print(cqueries1)
-    cqueries2[cq2] = 1
-    pqueries1 = np.zeros((pkey1.shape[0],),dtype = int)
-    pqueries2 = np.zeros((pkey2.shape[0],), dtype = int)
-    pqueries1[pq1] = 1
-    print(cqueries1)
-    pqueries2[pq2] = 1
+    p1hom = np.concatenate([points1, np.ones((points1.shape[0], 1))], axis=1)
+    p2hom = np.concatenate([points2, np.ones((points2.shape[0], 1))], axis=1)
+    #do this for ALL points. 
+    #worldPoints = computeDLT(p1hom, p2hom, P1, P2)
+    #visualize_3d_points_and_cameras(worldPoints[:, 0:3], [(R1cam, t1c), (R2cam, t2c), (R3cam, t3c)])
+
+
+
+    #need to get the points that are in both.
     #NEed to go to an ordered list. 
     # cq1 is a list of ordered values, as is pq2. Want to get the intersection of the two lists, but in 
     # two orderings: One preserving the order of the first, and the other preserving the second. Want list of 0, 1s with equal length to filter out the other queries. 
@@ -222,6 +224,7 @@ def triangulatePrevAndCurrentPoints(currKeypoints, currQueries, prevKeypoints, p
     p2hom = np.concatenate([points2, np.ones((points2.shape[0], 1))], axis=1)
     p3hom = np.concatenate([points3, np.ones((points3.shape[0], 1))], axis=1)
     worldPoints = computeDLT(p1hom, p2hom, P1, P2)
+    visualize_3d_points_and_cameras(worldPoints[:, 0:3], [(R1cam, t1c), (R2cam, t2c), (R3cam, t3c)])
     imagePoints3 = worldPoints@P3.T
     imagePoints3/=imagePoints3[:, 2][:, np.newaxis]
     imagePoints3 = imagePoints3[:, 0:2]
@@ -230,32 +233,37 @@ def triangulatePrevAndCurrentPoints(currKeypoints, currQueries, prevKeypoints, p
     return worldPoints, imagePoints3
 
 def estRelPose(points1, points2, image1, image2, K1, K2):
+    """
+    points1: Pixel coords of keypoint matches. 
+    """
     hom1p = np.concatenate([points1, np.ones(shape=(points1.shape[0], 1))], axis=1)
     hom2p = np.concatenate([points2, np.ones(shape=(points1.shape[0], 1))], axis=1)
     hom1 = hom1p @ np.linalg.inv(K1).T
     hom2 = hom2p @ np.linalg.inv(K2).T
     # Their method is MUCH better than mine. 
+   
+  
     F, mask = cv2.findFundamentalMat(points1, points2, cv2.FM_RANSAC)
+
+
     E = K2.T @ F @ K1
+ 
+    #F =np.linalg.inv(K2.T)@ E @ np.linalg.inv(K1)
     inlierIndices = mask.ravel() == 1
-    print("Shape of ind: ", inlierIndices.shape)
-    print("inlier indices: ", inlierIndices)
+    #print("Shape of ind: ", inlierIndices.shape)
+    #print("inlier indices: ", inlierIndices)
     inliers1 = points1[mask.ravel() == 1]
     inliers2 = points2[mask.ravel() == 1]
 
     #it's actually more complicated to compute R and t, 4 possible options. Need to address this by choosing ones such that keypoints in front of BOTH cameras. 
     #E, R, t = calculate_essential_matrix(hom1[0:100], hom2[0:100])
     #E= estimateEssentialMatrix(hom1, hom2)
-    #THIS FORMULA IS WRONG. Needs to be newK @ E @ newK.T
     
-    #F = np.linalg.inv(newK.T) @ E @ np.linalg.inv(newK)
-    #inliers1 = points1
-    #inliers2 = points2
-    #print("F: ", F)
+
     lines = cv2.computeCorrespondEpilines(inliers1,1, F = F)
-    #print(lines)
+
     plot_epipolar_lines(image1, image2, inliers1, inliers2, F)
-    #get real R and t: 
+   
 
     goodPoints = checkEpipolarConstraint(hom1, hom2, E)
     print("good points: ", goodPoints)
@@ -277,8 +285,8 @@ def estRelPose(points1, points2, image1, image2, K1, K2):
     extMat1 = np.concatenate([R1c, t1c[:, np.newaxis]], axis=1)
     P1 = K1@extMat1
     R1, R2, t1, t2 = poseEstimationFromEss(E, hom1adj, hom2adj)
-    disp = True
-    P2, R, t = poseEstimation(hom1padj, hom2padj, R1, R2, t1, t2, P1, K1, K2, s, disp)
+    disp = False
+    P2, R, t, f = poseEstimation(hom1padj, hom2padj, R1, R2, t1, t2, P1, K1, K2, s, disp)
     return R, t, doubleCheck
 def triangulate(points1, points2, image1, image2, K1, K2):
     hom1p = np.concatenate([points1, np.ones(shape=(points1.shape[0], 1))], axis=1)
@@ -447,65 +455,11 @@ def testMatrix(K):
     print(proj1.shape)
     print(proj2.shape)
     #Check epipolar constraint.
-    print(np.diag(proj2@F@proj1.T))
+    print("epipolar constraint: ", np.diag(proj2@F@proj1.T))
     s = 2
-    print(F)
+   
 
     R1,R2, t1, t2 = poseEstimationFromEss(E, normCoords1, normCoords2)
-    """
-    Rl = [R1, R2]
-    tl = [t1, t2]
-    count = []
-    for i in range(4):
-        R = Rl[i%2]
-        t = tl[i>1]
-        #need this because actually P1 isn't the identity. We have R and t relative to P1. 
-        #erro;r here: t1 was getting overwritten!!!
-        Rp = R @ R1cam
-        tp = (R@ t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
-        extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
-        #extMat2 = np.concatenate([R, s*t[:, np.newaxis]], axis=1)
-        P2 = K@extMat2
-        
-        X = computeDLT(proj1, proj2, P1, P2)[:, 0:3]
-        depth = (X@ Rp.T + s*tp)[:, 2]
-        otherDepth = (X@P1.T@np.linalg.inv(K).T)[:, 2]
-        #otherDepth = X[:, 2]
-        #print("OTher depth: ", otherDepth)
-        val = np.sum(np.logical_and(depth>=0, otherDepth>=0))
-        print(val)
-        count.append(val)
-        #visualize_3d_points_and_cameras(X, [(np.identity(3), np.zeros(shape = (3,))), (R, s*t)])
-    
-    #once I get R and t of second coords relative to the first one. I think it's the secon d] 
-    countArr = np.array(count)
-    maxCount = np.max(countArr)
-    i = np.argmax(countArr)
-    print("Max count: ", maxCount)          
-    print("i: ", i)
-    R = Rl[i%2]
-    t = tl[i>1]
-    #WITH SCALING THIS WORKS. Makes sense because we get a value for t without knowing the specific distances? 
-    #essential matrix doesn't provide scale. 
-    Rp = R @ R1cam
-    tp = (R@ t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
-    extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
-    #extMat1 = np.concatenate([np.identity(3), np.zeros((3,1))], axis=1)
-    #P1 = K@extMat1
-    P2 = K@extMat2
-    visualize_3d_points_and_cameras(worldPoints, [(I, z), (R, s*t)])
-    visualize_3d_points_and_cameras(worldPoints, [(R1cam, t1), (R@R1cam, (R@t1[:, np.newaxis] + s*t[:, np.newaxis])[:, 0])])
-    TDCoords = computeDLT(proj1, proj2, P1, P2)
-    print(TDCoords)
-    pixels1 = TDCoords @ P1.T
-    print(pixels1)
-    pixels2 = TDCoords @ P2.T
-    print(pixels2)
-    #doesn't work well.
-    points3d = cv2.triangulatePoints(projMatr1=extMat1, projMatr2 = extMat2, projPoints1 = normCoords1[:, 0:2].T, projPoints2 = normCoords2[:, 0:2].T).T
-    print(points3d)
-    visualize_3d_points_and_cameras(TDCoords, [(R1cam, t1),(Rp, tp)])
-    """
     P2a, Rp, tp = poseEstimation(proj1, proj2, R1, R2, t1, t2, P1, K, None, s,False)
     X = computeDLT(proj1, proj2, P1, P2a)
     print(np.linalg.norm(X[:, 0:3] - worldPoints, axis=-1))
@@ -526,13 +480,13 @@ def poseEstimation(x1, x2,R1, R2, t1, t2, P1, K1, K2, s, disp=False):
     Rt1 = np.linalg.inv(K1)@P1
     #could do this comp more fancy, but this is simpler. 
     R1c, t1c = Rt1[:, 0:3], Rt1[:, 3]
-    print("Det of Rc: ", np.linalg.det(R1c))
+    #print("Det of Rc: ", np.linalg.det(R1c))
     count = []
     for i in range(len(Rl)):
         for j in range(len(tl)):
             R = Rl[i]
             t = tl[j]
-            print("Det R: ", np.linalg.det(R))
+            #print("Det R: ", np.linalg.det(R))
             #need this because actually P1 isn't the identity. We have R and t relative to P1. 
             Rp = R @ R1c
             tp = (R@ t1c[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
@@ -540,13 +494,13 @@ def poseEstimation(x1, x2,R1, R2, t1, t2, P1, K1, K2, s, disp=False):
             P2 = K2@extMat2
             
             X = computeDLT(x1, x2, P1, P2)
-            #depth = (X@ Rp.T + s*tp)[:, 2]
+
             depth2 = (X@P2.T@np.linalg.inv(K2).T)[:, 2]
             depth1 = (X@P1.T@np.linalg.inv(K1).T)[:, 2]
-            print(depth2)
-            print(depth1)
+            #print(depth2)
+            #print(depth1)
             val = np.sum(np.logical_and(depth1>=0, depth2>=0))
-            print("Num both in front: ", val)
+            #print("Num both in front: ", val)
             count.append(val)
             if disp:
                 visualize_3d_points_and_cameras(X, [(R1c, t1c), (Rp, tp)])
@@ -562,8 +516,16 @@ def poseEstimation(x1, x2,R1, R2, t1, t2, P1, K1, K2, s, disp=False):
     tp = (R@ t1c[:, np.newaxis] + s*t[:, np.newaxis])[:, 0]
     extMat2 = np.concatenate([Rp, tp[:, np.newaxis]], axis=1)
     P2 = K2@extMat2
-    
-    return P2, R, t
+    X = computeDLT(x1, x2, P1, P2)
+
+    depth2 = (X@P2.T@np.linalg.inv(K2).T)[:, 2]
+    depth1 = (X@P1.T@np.linalg.inv(K1).T)[:, 2]
+    #print("Final depth 2: ", depth2)
+    #print("final depth 1: ", depth1)
+    val = np.sum(np.logical_and(depth1>=0, depth2>=0))
+    f = val/x1.shape[0]
+    print("Val: ", f)
+    return P2, R, t, f
 
 def loadImages(name, numIm):#
     listFrames = []
@@ -627,27 +589,30 @@ def getImMatches(kp1, des1, kp2, des2, bf):
 
     matches_kp1 = np.asarray(list_kp1)
     matches_kp2 = np.asarray(list_kp2)
+    #these are the same. 
     print(matches_kp1[0:10])
     print(kp1mat[query1] [0:10])
-    print(matches_kp1.shape)
-    print(matches_kp2.shape)
+
     
     # Remove duplicate matches
     combine_reduce = np.unique(np.concatenate((matches_kp1, matches_kp2),
                                             axis=1),
                             axis=0)
+    print(combine_reduce)
+    print(combine_reduce.shape)
     points1 = combine_reduce[:, 0:2]
     points2 = combine_reduce[:, -2:]
     print("points1: ", points1[0:10])
-    return points1, points2, query1, query2
+    
+    return points1, points2, kp1mat, kp2mat, query1, query2
 def getImMatchesAlt(kp1, des1, kp2, des2, bf):
+    """
+    There is a point in here where one of the things is rotated and the other one isn't? 
+    
+    """
     matches = bf.match(des1, des2)
     matches = sorted(matches, key=lambda x: x.distance)
-    #print("matches: ", matches)
-    #print("here")
-    #print(len(kp1))
-    #print(len(kp2))
-    #print(des1)
+   
     query1= np.array([mat.queryIdx for mat in matches], dtype =int)
     query2 =  np.array([mat.trainIdx for mat in matches], dtype=int)
     queries1 = np.zeros((des1.shape[0],),dtype = int)

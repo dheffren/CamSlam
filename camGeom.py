@@ -138,7 +138,7 @@ def calculate_essential_matrix(points1, points2):
     print("t: ", t)
     # t has an unknown scale factor we don't know how to calculate. 
     return E, R, t 
-def estimateEssentialMatrix(points1, points2):
+def estimateFundamentalMatrix(points1, points2):
     """
     Estimates the fundamental matrix given set of point correspondences in
     points1 and points2.
@@ -243,9 +243,9 @@ def computeDLT(points1, points2, P1, P2):
     points1Mat = (points1Alt @ P1[np.newaxis, :, :])[:, 0:2, :]
     points2Mat = (points2Alt @ P2[np.newaxis, :, :])[:, 0:2, :]
 
-    print(points1[0,0]*P1[2, :] - P1[0, :])
-    print(points1Mat[0,0])
-    print(points1Mat[0])
+    #print(points1[0,0]*P1[2, :] - P1[0, :])
+    #print(points1Mat[0,0])
+    #print(points1Mat[0])
     #print("points1mat shape: ", points1Mat.shape)
     #nx4x4
     pointsMat = np.concatenate([points1Mat, points2Mat], axis=1)
@@ -287,13 +287,13 @@ def computeDLT(points1, points2, P1, P2):
 
 
 def computeLinCrossMulti(points):
-    print("Shape points: ", points.shape)
+    #print("Shape points: ", points.shape)
     pointsAlt = np.zeros(shape = (points.shape[0], 3, 3))
     pointsAlt[:, 0, 1] = -1*points[:, 2]
     pointsAlt[:, 0, 2] = points[:, 1]
     pointsAlt[:, 1, 2] = -1*points[:, 0]
     pointsAlt = pointsAlt - np.transpose(pointsAlt, [0, 2, 1])
-    print(pointsAlt[0])
+    #print(pointsAlt[0])
     return pointsAlt
 
 def poseEstimationFromEss(E,  points1, points2):
@@ -330,8 +330,8 @@ def poseEstimationFromEss(E,  points1, points2):
     U, S, VT =  np.linalg.svd(E, full_matrices = True)
     print("S is: ", S)
     #MULTIPLYING BY -1 here got the determinant of rotation matrix to be +1. 
-    R1 = -1*U@W@VT
-    R2 = -1*U@W.T@VT
+    R1 = U@W@VT
+    R2 = U@W.T@VT
     Se = U@Z@U.T
     t1 = U[:, 2]
     t2= -t1
@@ -343,10 +343,10 @@ def poseEstimationFromEss(E,  points1, points2):
     p2 = points2[0]
     #tdpoint1 = np.concatenate([np.identity(3), np.zeros(shape = (3,1))],axis=1).T @ p1[:, np.newaxis]
     tdpoint1 = np.concatenate([p1, np.ones((1,))], axis=0)
-    print("td point 1: ", tdpoint1)
+    #print("td point 1: ", tdpoint1)
     mat = np.concatenate([R1, t1[:, np.newaxis]],axis=1)
     Matpinv = np.linalg.pinv(mat)
-    print("Pseudo size: ", Matpinv.shape)
+    #print("Pseudo size: ", Matpinv.shape)
     """
     Ux, Ex, VTx = np.linalg.svd(mat, full_matrices = True)
     r = np.count_nonzero(Ex)
@@ -359,11 +359,15 @@ def poseEstimationFromEss(E,  points1, points2):
     tdpoint2 = pseud @ p2[:, np.newaxis]
     """
     tdpoint2 = Matpinv @ p2[:, np.newaxis]
-    print("td point2 : ", tdpoint2)
+    #print("td point2 : ", tdpoint2)
     print(R1.T@(p2[:, np.newaxis] - t1[:, np.newaxis]))
     #somehow need to check which ones work. 
     #R1 and t1 work for my example. 
-    print("det : ", np.linalg.det(R1))
+    #print("det : ", np.linalg.det(R1))
+    if np.linalg.det(R1) == -1:
+        R1 = -R1
+    if np.linalg.det(R2) == -1:
+        R2 = -R2
     return R1, R2, t1, t2
 def checkProjectionOnPointPair():
     return
